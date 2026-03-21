@@ -23,7 +23,7 @@ data "aws_iam_policy_document" "lambda_permissions" {
       "logs:PutLogEvents"
     ]
     resources = [
-      "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:${var.cloudwatch_log_group_name}:*"
+      "arn:aws:logs:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:log-group:${var.cloudwatch_log_group_name}:*"
     ]
   }
 
@@ -44,7 +44,7 @@ data "aws_iam_policy_document" "lambda_permissions" {
 
   statement {
     actions   = ["guardduty:GetFindings"]
-    resources = ["arn:aws:guardduty:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:detector/${var.guardduty_detector_id}"]
+    resources = ["arn:aws:guardduty:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:detector/${var.guardduty_detector_id}"]
   }
 }
 
