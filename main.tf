@@ -4,7 +4,6 @@ provider "aws" {
 
 module "guardduty" {
   source       = "./modules/guardduty"
-  aws_region   = var.aws_region
   project_name = var.project_name
 }
 
