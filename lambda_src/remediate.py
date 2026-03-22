@@ -5,7 +5,8 @@ import logging
 from botocore.exceptions import ClientError
 
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+log_level = os.environ.get("LOG_LEVEL", "INFO")
+logger.setLevel(getattr(logging, log_level, logging.INFO))
 
 iam = boto3.client('iam')
 sns = boto3.client('sns')
@@ -119,15 +120,12 @@ def handler(event, context):
     # Publish SNS alert regardless of failure or success
     try:
         topic_arn = os.environ["SNS_TOPIC_ARN"]
-        if topic_arn:
-            sns.publish(
-                TopicArn=topic_arn,
-                Message=json.dumps(sns_message, indent=2),
-                Subject=f"GuardDuty Remediation Alert: {remediation_status}"
-            )
-            logger.info(f"SNS alert sent successfully to {topic_arn}.")
-        else:
-            logger.error("SNS_TOPIC_ARN environment variable not set.")
+        sns.publish(
+            TopicArn=topic_arn,
+            Message=json.dumps(sns_message, indent=2),
+            Subject=f"GuardDuty Remediation Alert: {remediation_status}"
+        )
+        logger.info(f"SNS alert sent successfully to {topic_arn}.")
     except Exception as e:
         logger.error("Failed to send SNS alert: %s", str(e))
 
