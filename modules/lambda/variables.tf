@@ -17,3 +17,13 @@ variable "guardduty_detector_id" {
   description = "GuardDuty detector ID"
   type        = string
 }
+
+variable "lambda_timeout" {
+  description = "Lambda timeout in seconds"
+  type        = number
+}
+
+variable "lambda_memory" {
+  description = "Lambda memory in MB"
+  type        = number
+}

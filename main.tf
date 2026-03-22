@@ -17,6 +17,8 @@ module "lambda" {
   sns_topic_arn             = module.notifications.sns_topic_arn
   cloudwatch_log_group_name = module.notifications.cloudwatch_log_group_name
   guardduty_detector_id     = module.guardduty.detector_id
+  lambda_timeout            = var.lambda_timeout
+  lambda_memory             = var.lambda_memory
 }
 
 module "notifications" {
