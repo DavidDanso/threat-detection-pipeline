@@ -40,13 +40,13 @@ def handler(event, context):
     # For user details, principalId often contains the ARN or unique identifier
     principal_id_or_arn = access_key_details.get("principalId", "UNKNOWN_ARN")
 
-    remediation_actions = []
-    failures = False
+    actions_taken = []
+    actions_failed = []
     
     logger.info("Remediation started for userType: %s, userName: %s", user_type, user_name)
 
     if user_name:
-        # Step 1: Deactivate access keys
+        # Step 1: Deactivate access keys (applicable for both types if userName is available)
         try:
             keys_res = iam.list_access_keys(UserName=user_name)
             for md in keys_res.get('AccessKeyMetadata', []):
@@ -56,12 +56,12 @@ def handler(event, context):
                         iam.update_access_key(UserName=user_name, AccessKeyId=key_id, Status='Inactive')
                         msg = f"Deactivated access key {key_id} for user {user_name}"
                         logger.info(msg)
-                        remediation_actions.append(msg)
+                        actions_taken.append(f"ACCESS_KEY_DEACTIVATED: {key_id}")
                     except Exception as e:
-                        failures = True
+                        actions_failed.append(f"ACCESS_KEY_DEACTIVATION_FAILED: {key_id}")
                         logger.error("Failed to deactivate key %s: %s", key_id, str(e))
         except Exception as e:
-            failures = True
+            actions_failed.append("ACCESS_KEY_DEACTIVATION_FAILED: _list_request_failed")
             logger.error("Failed to list access keys for user %s: %s", user_name, str(e))
 
         # Step 2: Delete login profile (Only for IAMUser)
@@ -70,32 +70,29 @@ def handler(event, context):
                 iam.delete_login_profile(UserName=user_name)
                 msg = f"Deleted login profile for user {user_name}"
                 logger.info(msg)
-                remediation_actions.append(msg)
+                actions_taken.append("LOGIN_PROFILE_DELETED")
             except ClientError as e:
                 # Catch NoSuchEntity safely
                 if e.response.get('Error', {}).get('Code') == 'NoSuchEntity':
                     msg = f"No login profile exists for user {user_name}"
                     logger.info(msg)
-                    remediation_actions.append(msg)
+                    actions_taken.append("LOGIN_PROFILE_DELETION_SKIPPED: NoSuchEntity")
                 else:
-                    failures = True
+                    actions_failed.append("LOGIN_PROFILE_DELETION_FAILED")
                     logger.error("Failed to delete login profile for user %s: %s", user_name, str(e))
             except Exception as e:
-                failures = True
+                actions_failed.append("LOGIN_PROFILE_DELETION_FAILED")
                 logger.error("Failed to delete login profile for user %s: %s", user_name, str(e))
         elif user_type == "AssumedRole":
             msg = "Login profile deletion skipped for AssumedRole (roles cannot be disabled directly)."
             logger.info(msg)
-            remediation_actions.append(msg)
+            actions_taken.append("LOGIN_PROFILE_DELETION_SKIPPED: AssumedRole")
     else:
-        failures = True
+        actions_failed.append("NO_USERNAME_FOUND")
         logger.error("No userName found in finding details.")
 
     # Determine final remediation status
-    if failures:
-        remediation_status = "PARTIAL_FAILURE"
-    else:
-        remediation_status = "SUCCESS"
+    remediation_status = "PARTIAL_FAILURE" if actions_failed else "SUCCESS"
 
     # Construct structured SNS Message
     sns_message = {
@@ -113,14 +110,15 @@ def handler(event, context):
             "username": user_name or "UNKNOWN",
             "arn": principal_id_or_arn
         },
-        "remediation_actions": remediation_actions,
+        "remediation_actions": actions_taken,
+        "failed_actions": actions_failed,
         "remediation_status": remediation_status,
         "lambda_request_id": getattr(context, 'aws_request_id', 'UNKNOWN_ID') if context else 'UNKNOWN_ID'
     }
 
     # Publish SNS alert regardless of failure or success
     try:
-        topic_arn = os.environ.get("SNS_TOPIC_ARN", "")
+        topic_arn = os.environ["SNS_TOPIC_ARN"]
         if topic_arn:
             sns.publish(
                 TopicArn=topic_arn,
@@ -133,7 +131,4 @@ def handler(event, context):
     except Exception as e:
         logger.error("Failed to send SNS alert: %s", str(e))
 
-    return {
-        "statusCode": 200,
-        "body": json.dumps({"message": "Remediation logic executed.", "status": remediation_status})
-    }
+    return {"statusCode": 200, "body": f"Remediation complete. Status: {remediation_status}"}
