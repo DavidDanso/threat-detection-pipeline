@@ -17,3 +17,8 @@ output "lambda_function_name" {
   description = "The name of the Lambda remediation function"
   value       = module.lambda.lambda_function_name
 }
+
+output "event_rule_arn" {
+  description = "EventBridge rule ARN"
+  value       = module.eventbridge.event_rule_arn
+}
