@@ -32,3 +32,10 @@ module "notifications" {
   alert_email        = var.alert_email
   log_retention_days = var.log_retention_days
 }
+
+module "security_hub" {
+  source       = "./modules/security_hub"
+  project_name = var.project_name
+
+  depends_on = [module.guardduty]
+}
