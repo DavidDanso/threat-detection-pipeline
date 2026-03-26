@@ -120,6 +120,9 @@ aws iam create-login-profile --user-name compromised-test-user --password 'TempP
 Save the `AccessKeyId` returned from the second command.
 
 **3. Invoke the Lambda directly with a crafted payload:**
+
+> **Note:** `--cli-binary-format raw-in-base64-out` is required for AWS CLI v2. Omit this flag if you are on CLI v1.
+
 ```bash
 aws lambda invoke \
   --function-name $(terraform output -raw lambda_function_name) \
@@ -135,7 +138,30 @@ Expected response:
 {"statusCode": 200, "body": "Remediation complete. Status: SUCCESS"}
 ```
 
-**4. Verify the remediation happened in AWS:**
+If you see `PARTIAL_FAILURE`, one IAM action did not complete. Check CloudWatch Logs (Step 4) for the specific error before proceeding.
+
+**4. Check CloudWatch Logs for execution details:**
+```bash
+# Get the latest log stream name
+aws logs describe-log-streams \
+  --log-group-name /aws/lambda/$(terraform output -raw lambda_function_name) \
+  --order-by LastEventTime \
+  --descending \
+  --limit 1 \
+  --query 'logStreams[0].logStreamName' \
+  --output text
+```
+
+Then pull the log events — replace `<log_stream_name>` with the output from the command above:
+```bash
+aws logs get-log-events \
+  --log-group-name /aws/lambda/$(terraform output -raw lambda_function_name) \
+  --log-stream-name '<log_stream_name>'
+```
+
+Confirm the logs show: finding received → access key deactivated → login profile deleted → SNS alert published.
+
+**5. Verify the remediation happened in AWS:**
 ```bash
 # Access key must show Status: Inactive
 aws iam list-access-keys --user-name compromised-test-user
@@ -144,21 +170,29 @@ aws iam list-access-keys --user-name compromised-test-user
 aws iam get-login-profile --user-name compromised-test-user
 ```
 
-**5. Check your email inbox** — confirm the structured JSON alert arrived with `remediation_status: SUCCESS` and `affected_principal.username: compromised-test-user`.
+**6. Check your email inbox** — confirm the structured JSON alert arrived with `remediation_status: SUCCESS` and `affected_principal.username: compromised-test-user`.
 
-**6. Clean up the test user (in this exact order):**
+**7. Clean up the test user:**
+
+Run these commands in this exact order. Skipping or reordering will cause `DeleteConflict` errors.
+
 ```bash
+# Step 1 — delete the access key (Lambda deactivated it but did not delete it)
 aws iam delete-access-key --user-name compromised-test-user --access-key-id <AccessKeyId>
+
+# Step 2 — delete the login profile if it still exists
+# If Lambda successfully deleted it, this returns NoSuchEntityException — that is expected and can be ignored
+aws iam delete-login-profile --user-name compromised-test-user
+
+# Step 3 — delete the user
 aws iam delete-user --user-name compromised-test-user
 ```
-
-> Login profile was already deleted by Lambda — skip that step.
 
 ---
 
 ### EventBridge Routing Verification
 
-This test confirms EventBridge is correctly wired to Lambda. It uses a fabricated GuardDuty identity so IAM remediation will fail — that is expected. The only thing being verified here is that the routing works.
+This test confirms EventBridge is correctly wired to Lambda. It uses a fabricated GuardDuty identity so IAM remediation will fail with `PARTIAL_FAILURE` — that is expected. The only thing being verified here is that EventBridge routes the finding to Lambda.
 
 ```bash
 aws guardduty create-sample-findings \
@@ -166,17 +200,51 @@ aws guardduty create-sample-findings \
   --finding-types 'CredentialAccess:IAMUser/AnomalousBehavior'
 ```
 
-Wait 2 minutes, then check CloudWatch Logs for a Lambda invocation triggered by EventBridge.
+Wait 2 minutes, then check CloudWatch Logs for a second Lambda invocation log stream.
 
 ---
 
-### Verify the Pipeline
+### Final Verification Checklist
 
-After running either test:
+After running both tests confirm:
 
-- **CloudWatch Logs** — check `/aws/lambda/<project_name>-remediate` for Lambda invocation logs
-- **Email** — confirm a structured JSON alert arrived in your inbox
-- **Security Hub** — navigate to Security Hub CSPM → Findings and confirm GuardDuty findings are visible
+- `response.json` returned `statusCode: 200` and `Status: SUCCESS`
+- CloudWatch Logs show access key deactivated and login profile deleted
+- SNS email delivered to inbox with correct structured JSON body
+- A second Lambda invocation in CloudWatch Logs confirms EventBridge routing
+- Security Hub CSPM → Findings shows GuardDuty findings visible
+
+## Troubleshooting
+
+**Lambda not triggered by EventBridge**
+- Confirm the EventBridge rule is enabled: `aws events describe-rule --name <rule_name>`
+- Confirm `aws_lambda_permission` exists for `events.amazonaws.com` — without it EventBridge cannot invoke Lambda even if the target is set correctly
+
+**SNS email not delivered**
+- The SNS subscription must be confirmed before emails arrive. Check the subscription status:
+  ```bash
+  aws sns list-subscriptions-by-topic --topic-arn $(terraform output -raw sns_topic_arn)
+  ```
+- If status is `PendingConfirmation`, check your inbox for the AWS confirmation email and click the link
+
+**Lambda returns `PARTIAL_FAILURE`**
+- Check CloudWatch Logs for the specific IAM action that failed
+- Confirm the Lambda IAM execution role has `iam:ListAccessKeys`, `iam:UpdateAccessKey`, `iam:DeleteLoginProfile`, and `iam:GetUser` scoped to `arn:aws:iam::*:user/*`
+
+**Security Hub shows no findings**
+- Confirm GuardDuty and Security Hub are both enabled in the same region
+- Check the GuardDuty integration is active:
+  ```bash
+  aws securityhub list-enabled-products-for-import
+  ```
+- If GuardDuty is not listed, enable the integration:
+  ```bash
+  aws securityhub enable-import-findings-from-product \
+    --product-arn "arn:aws:securityhub:<your_region>::product/aws/guardduty"
+  ```
+
+**`terraform apply` fails on Security Hub**
+- Security Hub must be applied after GuardDuty. Confirm `depends_on = [module.guardduty]` exists on the `module "security_hub"` block in root `main.tf`
 
 ## Cost Note
 
