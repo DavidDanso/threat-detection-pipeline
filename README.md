@@ -45,7 +45,7 @@ When a matching finding is detected, the Lambda function:
 ## Project Structure
 
 ```
-threat-detection-pipeline/
+iam-credential-auto-remediation-pipeline/
 ├── main.tf                  # Root module composition
 ├── variables.tf             # Root-level input variables
 ├── outputs.tf               # Root-level outputs
@@ -71,8 +71,8 @@ threat-detection-pipeline/
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/DavidDanso/threat-detection-pipeline.git
-   cd threat-detection-pipeline
+   git clone https://github.com/DavidDanso/iam-credential-auto-remediation-pipeline.git
+   cd iam-credential-auto-remediation-pipeline
    ```
 
 2. **Configure variables** — edit `terraform.tfvars`:
